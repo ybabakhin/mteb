@@ -6,11 +6,12 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import torch
 import torch.nn.functional as F
-from tqdm.autonotebook import tqdm
+from tqdm.auto import tqdm
 
 from mteb._requires_package import requires_image_dependencies, requires_package
 from mteb.models.abs_encoder import AbsEncoder
 from mteb.models.model_meta import ModelMeta, ScoringFunction
+from mteb.types import PromptType
 
 if TYPE_CHECKING:
     from PIL import Image as PILImage
@@ -36,6 +37,7 @@ MIN_PIXELS = 4 * IMAGE_FACTOR * IMAGE_FACTOR
 MAX_PIXELS = 1800 * IMAGE_FACTOR * IMAGE_FACTOR
 MAX_LENGTH = 8192
 DEFAULT_INSTRUCTION = "Represent the user's input."
+VIDORE_QUERY_INSTRUCTION = "Find a document image that matches the given query."
 
 
 def _build_qwen3_vl_for_embedding_class():
@@ -110,6 +112,7 @@ def _build_qwen3_vl_for_embedding_class():
             cache_position: torch.LongTensor | None = None,
             **kwargs,
         ) -> tuple | Qwen3VLForEmbeddingOutput:
+            self.model.rope_deltas = None
             outputs = self.model(
                 input_ids=input_ids,
                 pixel_values=pixel_values,
@@ -305,6 +308,20 @@ class Qwen3VLEmbeddingWrapper(AbsEncoder):
                 result.append(tv_functional.to_pil_image(img.cpu()))
         return result
 
+    def _get_vidore_instruction(
+        self,
+        task_metadata: TaskMetadata,
+        prompt_type: PromptType | None,
+    ) -> str:
+        """Return Qwen's own ViDoRe instruction for DocumentUnderstanding tasks,
+        falling back to the standard MTEB instruction otherwise."""
+        if task_metadata.type == "DocumentUnderstanding" and prompt_type == PromptType.query:
+            return VIDORE_QUERY_INSTRUCTION
+        instruction = self.get_instruction(task_metadata, prompt_type)
+        if not instruction:
+            instruction = DEFAULT_INSTRUCTION
+        return instruction
+
     def encode(
         self,
         inputs: DataLoader[BatchedInput],
@@ -316,9 +333,7 @@ class Qwen3VLEmbeddingWrapper(AbsEncoder):
         show_progress_bar: bool = True,
         **kwargs: Any,
     ) -> Array:
-        instruction = self.get_instruction(task_metadata, prompt_type)
-        if not instruction:
-            instruction = DEFAULT_INSTRUCTION
+        instruction = self._get_vidore_instruction(task_metadata, prompt_type)
 
         contains_text = "text" in inputs.dataset.features
         contains_image = "image" in inputs.dataset.features
@@ -363,11 +378,15 @@ class Qwen3VLEmbeddingWrapper(AbsEncoder):
                 embeddings = F.normalize(embeddings, p=2, dim=-1)
                 all_embeddings.append(embeddings.cpu())
 
-        return torch.cat(all_embeddings, dim=0)
+        return torch.cat(all_embeddings, dim=0).float()
 
 
 qwen3_vl_embedding_2b = ModelMeta(
     loader=Qwen3VLEmbeddingWrapper,
+    loader_kwargs={
+        "torch_dtype": torch.bfloat16,
+        "attn_implementation": "flash_attention_2",
+    },
     name="Qwen/Qwen3-VL-Embedding-2B",
     model_type=["dense"],
     languages=[],
@@ -393,6 +412,10 @@ qwen3_vl_embedding_2b = ModelMeta(
 
 qwen3_vl_embedding_8b = ModelMeta(
     loader=Qwen3VLEmbeddingWrapper,
+    loader_kwargs={
+        "torch_dtype": torch.bfloat16,
+        "attn_implementation": "flash_attention_2",
+    },
     name="Qwen/Qwen3-VL-Embedding-8B",
     model_type=["dense"],
     languages=[],
