@@ -88,9 +88,23 @@ class NumpyCache:
                 self.vectors_file,
                 dtype="float32",
                 mode="r+",
-                shape=(-1, self.vector_dim),
+                shape=self._vectors_shape_from_file(),
             )
         logger.info(f"Vectors file initialized with shape: {self.vectors.shape}")
+
+    def _vectors_shape_from_file(self) -> tuple[int, int]:
+        if self.vector_dim is None:
+            raise RuntimeError(
+                "Vector dimension not set. Unable to infer vectors file shape."
+            )
+        bytes_per_vector = self.vector_dim * np.dtype(np.float32).itemsize
+        file_size = self.vectors_file.stat().st_size
+        if file_size % bytes_per_vector != 0:
+            raise ValueError(
+                f"Vectors file {self.vectors_file} has {file_size} bytes, which "
+                f"is not divisible by vector size {bytes_per_vector}."
+            )
+        return (file_size // bytes_per_vector, self.vector_dim)
 
     def _double_vectors_file(self) -> None:
         if self.vectors is None or self.vector_dim is None:
@@ -167,7 +181,7 @@ class NumpyCache:
                         self.vectors_file,
                         dtype="float32",
                         mode="r+",
-                        shape=(-1, self.vector_dim),
+                        shape=self._vectors_shape_from_file(),
                     )
                     logger.info(f"Loaded vectors file with shape: {self.vectors.shape}")
                 else:
