@@ -209,11 +209,11 @@ class BelebeleRetrieval(AbsTaskRetrieval):
 """,
     )
 
-    def load_data(self, **kwargs) -> None:
+    def load_data(self, num_proc: int | None = None, **kwargs) -> None:
         if self.data_loaded:
             return
 
-        self.dataset = load_dataset(**self.metadata.dataset)
+        self.dataset = {}
 
         self.queries = {lang_pair: {_EVAL_SPLIT: {}} for lang_pair in self.hf_subsets}
         self.corpus = {lang_pair: {_EVAL_SPLIT: {}} for lang_pair in self.hf_subsets}
@@ -227,6 +227,14 @@ class BelebeleRetrieval(AbsTaskRetrieval):
                 languages[0].replace("-", "_"),
                 languages[1].replace("-", "_"),
             )
+            for lang in (lang_corpus, lang_question):
+                if lang not in self.dataset:
+                    self.dataset[lang] = load_dataset(
+                        name=lang,
+                        split=_EVAL_SPLIT,
+                        num_proc=num_proc,
+                        **self.metadata.dataset,
+                    )
             ds_corpus = self.dataset[lang_corpus]
             ds_question = self.dataset[lang_question]
 
